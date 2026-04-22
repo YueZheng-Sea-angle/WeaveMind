@@ -28,7 +28,7 @@ export function AppLayout() {
       <aside className="flex w-56 flex-col border-r border-border bg-sidebar-background">
         <div className="flex h-14 items-center gap-2 border-b border-sidebar-border px-4">
           <BookOpen className="h-5 w-5 text-sidebar-primary" />
-          <span className="font-semibold text-sidebar-foreground">ReadAgent</span>
+          <span className="font-semibold text-sidebar-foreground">WeaveMind</span>
         </div>
 
         <div className="flex flex-1 flex-col gap-1 overflow-y-auto p-2">
