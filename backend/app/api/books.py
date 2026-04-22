@@ -55,7 +55,7 @@ async def upload_book_file(
     book.processing_status = ProcessingStatus.SPLITTING
     await db.flush()
 
-    chapters = split_chapters(text)
+    chapters = await split_chapters(text)
     for i, ch in enumerate(chapters, start=1):
         chapter = Chapter(
             book_id=book_id,
