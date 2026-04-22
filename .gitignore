@@ -1,0 +1,7 @@
+backend/.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.DS_Store
+readagent_架构规划_bb07ae0d.plan.md

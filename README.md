@@ -1,4 +1,4 @@
-# ReadAgent
+# WeaveMind
 
 为长篇小说（10万字以上）构建的多 Agent 写作分析软件。
 
