@@ -10,6 +10,22 @@
 
 ## 快速开始
 
+### 一键启动（推荐）
+
+```bash
+chmod +x start.sh
+./start.sh
+# 二次启动可跳过依赖安装（更快）
+./start.sh --skip-install
+```
+
+说明：
+- 脚本会自动创建后端虚拟环境并安装 `backend/requirements.txt`
+- 首次运行会自动安装前端依赖（`frontend/node_modules`）
+- 若依赖已安装，可用 `./start.sh --skip-install` 直接启动
+- 启动后前端地址为 `http://127.0.0.1:5173`，后端地址为 `http://127.0.0.1:8000`
+- 按 `Ctrl+C` 会同时关闭前后端
+
 ### 后端
 
 ```bash
