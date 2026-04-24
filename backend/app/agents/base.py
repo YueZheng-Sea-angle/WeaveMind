@@ -26,6 +26,22 @@ def get_processing_llm() -> ChatOpenAI:
     )
 
 
+def get_chat_llm(model_override: str | None = None) -> ChatOpenAI:
+    """返回用于 Chat Brain 对话的 LLM 实例，支持每次请求级别的模型覆盖。"""
+    api_key = get_runtime_setting("openai_api_key", app_settings.OPENAI_API_KEY)
+    base_url = get_runtime_setting("openai_base_url", app_settings.OPENAI_BASE_URL)
+    model = model_override or get_runtime_setting("chat_model", app_settings.DEFAULT_CHAT_MODEL)
+
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key or "sk-placeholder",
+        base_url=base_url or None,
+        temperature=0.3,
+        timeout=180,
+        streaming=True,
+    )
+
+
 def get_embeddings() -> OpenAIEmbeddings:
     """返回用于生成文本向量的 Embedding 实例。"""
     api_key = get_runtime_setting("openai_api_key", app_settings.OPENAI_API_KEY)
