@@ -92,9 +92,16 @@ export interface ModelSettings {
 }
 
 export interface ProcessingProgress {
-  book_id: number
-  status: ProcessingStatus
-  current_chapter: number
-  total_chapters: number
+  chapter_number: number
+  chapter_title: string
+  status: 'processing' | 'done' | 'error'
+  processed: number
+  total: number
+}
+
+export interface ProcessingComplete {
+  processed: number
+  total: number
+  failed_chapters: number[]
   message: string
 }

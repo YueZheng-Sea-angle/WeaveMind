@@ -8,16 +8,23 @@ export const booksApi = {
   get: (id: number) =>
     apiClient.get<Book>(`/books/${id}`).then((r) => r.data),
 
-  upload: (file: File, title: string) => {
+  create: (title: string) =>
+    apiClient
+      .post<Book>('/books', { title })
+      .then((r) => r.data),
+
+  upload: (bookId: number, file: File) => {
     const form = new FormData()
     form.append('file', file)
-    form.append('title', title)
     return apiClient
-      .post<Book>('/books/upload', form, {
+      .post<Book>(`/books/${bookId}/upload`, form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
       .then((r) => r.data)
   },
+
+  triggerProcess: (id: number) =>
+    apiClient.post(`/books/${id}/process`).then((r) => r.data),
 
   delete: (id: number) => apiClient.delete(`/books/${id}`),
 }

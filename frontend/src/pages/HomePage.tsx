@@ -57,7 +57,8 @@ export function HomePage() {
     if (!selectedFile || !title.trim()) return
     setUploading(true)
     try {
-      const book = await booksApi.upload(selectedFile, title.trim())
+      const createdBook = await booksApi.create(title.trim())
+      const book = await booksApi.upload(createdBook.id, selectedFile)
       await queryClient.invalidateQueries({ queryKey: ['books'] })
       navigate(`/books/${book.id}/processing`)
     } finally {
@@ -72,7 +73,7 @@ export function HomePage() {
     if (book.processing_status === 'processing') {
       navigate(`/books/${book.id}/processing`)
     } else {
-      navigate(`/books/${book.id}/chat`)
+      navigate(`/books/${book.id}/chapters`)
     }
   }
 
