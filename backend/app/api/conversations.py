@@ -6,7 +6,7 @@ from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
 from app.models.conversation import Conversation, Message
-from app.schemas.conversation import ChatRequest, ConversationCreate, ConversationRead
+from app.schemas.conversation import ChatRequest, ConversationCreate, ConversationRead, MessageRead
 
 router = APIRouter()
 
@@ -59,6 +59,16 @@ async def delete_conversation(book_id: int, conv_id: int, db: AsyncSession = Dep
     if not conv:
         raise HTTPException(status_code=404, detail="对话不存在")
     await db.delete(conv)
+
+
+@router.get("/{book_id}/conversations/{conv_id}/messages", response_model=list[MessageRead])
+async def list_messages(book_id: int, conv_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Message)
+        .where(Message.conversation_id == conv_id)
+        .order_by(Message.id)
+    )
+    return result.scalars().all()
 
 
 @router.post("/{book_id}/conversations/{conv_id}/chat")

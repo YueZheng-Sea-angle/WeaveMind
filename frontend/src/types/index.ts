@@ -63,23 +63,25 @@ export interface Event {
 export interface Conversation {
   id: number
   book_id: number
+  title: string | null
   created_at: string
+  messages: Message[]
 }
 
 export interface Message {
   id: number
   conversation_id: number
   role: 'user' | 'assistant' | 'tool'
-  content: string
-  tool_calls: ToolCall[] | null
+  content: string | null
+  tool_calls: ToolCall[]
   created_at: string
 }
 
+/** 与后端 tool_calls_log 格式一致：{name, input}，output 仅在流式状态中携带 */
 export interface ToolCall {
-  id: string
   name: string
-  arguments: Record<string, unknown>
-  result?: unknown
+  input: Record<string, unknown>
+  output?: string
 }
 
 export interface ModelSettings {
@@ -104,4 +106,43 @@ export interface ProcessingComplete {
   total: number
   failed_chapters: number[]
   message: string
+}
+
+// ── SSE 事件类型（流式对话） ──────────────────────────────────────────────────
+
+export interface SSETextData {
+  chunk: string
+}
+
+export interface SSEToolStartData {
+  tool_name: string
+  input: Record<string, unknown>
+}
+
+export interface SSEToolEndData {
+  tool_name: string
+  output: string
+}
+
+export interface SSEDoneData {
+  message: string
+}
+
+export interface SSEErrorData {
+  message: string
+}
+
+export type SSEEventName = 'text' | 'tool_start' | 'tool_end' | 'done' | 'error'
+
+export interface SSEEvent {
+  event: SSEEventName
+  data: SSETextData | SSEToolStartData | SSEToolEndData | SSEDoneData | SSEErrorData
+}
+
+/** 流式过程中实时追踪的单次工具调用状态 */
+export interface StreamingToolCall {
+  tool_name: string
+  input: Record<string, unknown>
+  output?: string
+  status: 'running' | 'done'
 }
