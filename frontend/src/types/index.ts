@@ -50,6 +50,37 @@ export interface Relation {
   chapter_range: number[]
 }
 
+// ── 关键角色卡 ────────────────────────────────────────────────────────────────
+
+export type CharacterCardCategory =
+  | 'biography'
+  | 'personality'
+  | 'relationship'
+  | 'skill'
+  | 'item'
+  | 'status'
+  | 'foreshadowing'
+
+export interface CharacterCardEntry {
+  id: number
+  card_id: number
+  category: CharacterCardCategory
+  title: string
+  content: string | null
+  enabled: boolean
+  sort_order: number
+}
+
+export interface CharacterCard {
+  id: number
+  book_id: number
+  entity_id: number | null
+  name: string
+  summary: string | null
+  enabled: boolean
+  entries: CharacterCardEntry[]
+}
+
 export interface Event {
   id: number
   book_id: number

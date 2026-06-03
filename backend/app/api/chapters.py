@@ -152,6 +152,7 @@ async def reprocess_chapter(book_id: int, chapter_id: int, db: AsyncSession = De
     """
     from app.agents.entity_extractor import extract_entities_for_chapter
     from app.agents.anchor_builder import build_anchor_for_chapter
+    from app.agents.character_card_builder import update_character_cards_for_chapter
 
     chapter = await db.get(Chapter, chapter_id)
     if not chapter or chapter.book_id != book_id:
@@ -166,6 +167,13 @@ async def reprocess_chapter(book_id: int, chapter_id: int, db: AsyncSession = De
             db=db,
         )
         await build_anchor_for_chapter(
+            chapter_id=chapter.id,
+            chapter_number=chapter.chapter_number,
+            chapter_text=chapter.raw_text,
+            book_id=book_id,
+            db=db,
+        )
+        await update_character_cards_for_chapter(
             chapter_id=chapter.id,
             chapter_number=chapter.chapter_number,
             chapter_text=chapter.raw_text,

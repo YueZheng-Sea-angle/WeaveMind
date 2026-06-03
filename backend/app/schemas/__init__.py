@@ -7,10 +7,20 @@ from app.schemas.conversation import (
     MessageRead,
     ChatRequest,
 )
+from app.schemas.character_card import (
+    CharacterCardCreate,
+    CharacterCardUpdate,
+    CharacterCardRead,
+    CharacterCardEntryCreate,
+    CharacterCardEntryUpdate,
+    CharacterCardEntryRead,
+)
 
 __all__ = [
     "BookCreate", "BookRead", "BookUpdate", "BookListItem",
     "ChapterRead", "ChapterAnchorRead", "ChapterAnchorUpdate",
     "EntityRead", "EntityCreate", "EntityUpdate", "RelationRead", "EventRead",
     "ConversationCreate", "ConversationRead", "MessageRead", "ChatRequest",
+    "CharacterCardCreate", "CharacterCardUpdate", "CharacterCardRead",
+    "CharacterCardEntryCreate", "CharacterCardEntryUpdate", "CharacterCardEntryRead",
 ]

@@ -20,6 +20,12 @@ from app.db.chroma_client import ChromaCollections, get_or_create_collection
 from app.db.database import AsyncSessionLocal
 from app.models.chapter import Chapter, ChapterAnchor
 from app.models.entity import Entity, Relation
+from app.models.character_card import (
+    CATEGORY_LABELS,
+    VALID_CATEGORIES,
+    CharacterCard,
+    CharacterCardEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -115,6 +121,49 @@ class DeleteRelationInput(BaseModel):
     )
 
 
+_CATEGORY_DESC = (
+    "条目分类，必须是以下之一：biography（生平）/ personality（性格特点）/ "
+    "relationship（人物关系）/ skill（技能）/ item（道具）/ status（当前状态）/ "
+    "foreshadowing（关键伏笔）"
+)
+
+
+class CreateCharacterCardInput(BaseModel):
+    name: str = Field(description="角色卡对应角色的规范名称（全名或最常用称呼）")
+    summary: str | None = Field(None, description="角色一句话简介；可留空")
+
+
+class EditCharacterCardInput(BaseModel):
+    name: str = Field(description="要修改的角色卡名称")
+    new_name: str | None = Field(None, description="新的角色名称；None 表示不修改")
+    summary: str | None = Field(None, description="新的角色简介；None 表示不修改")
+
+
+class DeleteCharacterCardInput(BaseModel):
+    name: str = Field(description="要删除的角色卡名称")
+
+
+class AddCardEntryInput(BaseModel):
+    card_name: str = Field(description="目标角色卡的角色名称")
+    category: str = Field(description=_CATEGORY_DESC)
+    title: str = Field(description="条目标题，如技能名、道具名、关系对象名、伏笔简称等")
+    content: str | None = Field(None, description="条目正文内容（详细描述）；可留空")
+
+
+class EditCardEntryInput(BaseModel):
+    card_name: str = Field(description="目标角色卡的角色名称")
+    category: str = Field(description=_CATEGORY_DESC)
+    title: str = Field(description="用于定位条目的现有标题（同分类下需唯一）")
+    new_title: str | None = Field(None, description="新的条目标题；None 表示不修改")
+    new_content: str | None = Field(None, description="新的条目正文；None 表示不修改")
+
+
+class DeleteCardEntryInput(BaseModel):
+    card_name: str = Field(description="目标角色卡的角色名称")
+    category: str = Field(description=_CATEGORY_DESC)
+    title: str = Field(description="要删除条目的标题（同分类下需唯一）")
+
+
 # ── 工具工厂 ──────────────────────────────────────────────────────────────────
 
 
@@ -131,6 +180,24 @@ def _match_entity(entities: list[Entity], name: str) -> Entity | None:
     for ent in entities:
         if name_lower in ent.name.lower() or ent.name.lower() in name_lower:
             return ent
+    return None
+
+
+def _match_enabled_card(cards: list[CharacterCard], name: str) -> CharacterCard | None:
+    """在启用的角色卡中按名称匹配（精确优先，其次包含式模糊）。
+
+    仅匹配 enabled=True 的卡片：停用的卡片对对话大脑不可见。
+    """
+    name_lower = name.strip().lower()
+    if not name_lower:
+        return None
+    enabled = [c for c in cards if c.enabled]
+    for card in enabled:
+        if card.name.lower() == name_lower:
+            return card
+    for card in enabled:
+        if name_lower in card.name.lower() or card.name.lower() in name_lower:
+            return card
     return None
 
 
@@ -1037,6 +1104,312 @@ def make_tools(book_id: int) -> list:
             f"{numbered}"
         )
 
+    # ── 角色卡工具 ────────────────────────────────────────────────────────────
+    # 说明：角色卡及其子条目带「启用/停用」状态，但该状态对对话大脑完全不可见，
+    # 也不可被对话大脑修改。以下所有读取工具都只返回启用中的卡片与条目；
+    # 停用的卡片/条目既不会出现在结果里，也无法被编辑或删除工具定位到。
+
+    async def _load_cards_with_entries(db) -> list[CharacterCard]:
+        from sqlalchemy.orm import selectinload
+
+        result = await db.execute(
+            select(CharacterCard)
+            .where(CharacterCard.book_id == book_id)
+            .options(selectinload(CharacterCard.entries))
+        )
+        return list(result.scalars().all())
+
+    # ── 16. list_character_cards ──────────────────────────────────────────────
+
+    @tool
+    async def list_character_cards() -> str:
+        """列出本书所有「关键角色卡」的概览（角色名、简介、各分类启用条目数）。
+        关键角色卡维护重点角色的生平、性格、关系、技能、道具、当前状态、关键伏笔等结构化信息。
+        适用于了解有哪些重点角色、快速定位某角色卡的场景。"""
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+
+        cards = [c for c in cards if c.enabled]
+        if not cards:
+            return "本书暂无关键角色卡。可使用 create_character_card 新建。"
+
+        lines = [f"【关键角色卡】（共 {len(cards)} 张）\n"]
+        for card in sorted(cards, key=lambda c: c.name):
+            enabled_entries = [e for e in card.entries if e.enabled]
+            cat_counts: dict[str, int] = {}
+            for e in enabled_entries:
+                cat_counts[e.category] = cat_counts.get(e.category, 0) + 1
+            cats_str = (
+                "、".join(
+                    f"{CATEGORY_LABELS.get(c, c)}×{n}" for c, n in cat_counts.items()
+                )
+                or "暂无条目"
+            )
+            lines.append(
+                f"• {card.name}：{card.summary or '（无简介）'}\n    条目：{cats_str}"
+            )
+        return _truncate("\n".join(lines))
+
+    # ── 17. get_character_card ────────────────────────────────────────────────
+
+    @tool
+    async def get_character_card(name: str) -> str:
+        """获取指定角色的「关键角色卡」详情，按分类（生平/性格特点/人物关系/技能/道具/当前状态/关键伏笔）
+        列出所有启用中的条目。适用于深入了解某重点角色的设定时调用。"""
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+
+        card = _match_enabled_card(cards, name)
+        if not card:
+            return f"未找到名为「{name}」的关键角色卡（或该卡片已停用）。可用 list_character_cards 查看现有角色卡。"
+
+        lines = [f"【关键角色卡：{card.name}】"]
+        if card.summary:
+            lines.append(f"简介：{card.summary}")
+        lines.append("")
+
+        enabled_entries = [e for e in card.entries if e.enabled]
+        if not enabled_entries:
+            lines.append("（该角色卡暂无可用条目）")
+            return _truncate("\n".join(lines))
+
+        # 按预定义分类顺序输出
+        for cat in CATEGORY_LABELS:
+            items = [e for e in enabled_entries if e.category == cat]
+            if not items:
+                continue
+            lines.append(f"── {CATEGORY_LABELS[cat]} ──")
+            for e in items:
+                content = e.content or "（无详细内容）"
+                lines.append(f"  • {e.title}：{content}")
+            lines.append("")
+
+        return _truncate("\n".join(lines))
+
+    # ── 18. create_character_card ─────────────────────────────────────────────
+
+    @tool(args_schema=CreateCharacterCardInput)
+    async def create_character_card(name: str, summary: str | None = None) -> str:
+        """为某个重点角色新建一张「关键角色卡」。
+        创建前会按名称去重，若已存在同名启用卡片则拒绝并提示改用 add_character_card_entry 补充内容。
+        若存在同名实体（人物），会自动关联。"""
+        clean_name = name.strip()
+        if not clean_name:
+            return "角色名称不能为空。"
+
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            if _match_enabled_card(cards, clean_name) is not None:
+                return (
+                    f"已存在名为「{clean_name}」的关键角色卡，未重复创建。"
+                    f"如需补充信息，请改用 add_character_card_entry。"
+                )
+
+            # 尝试关联同名实体
+            ent_result = await db.execute(
+                select(Entity).where(Entity.book_id == book_id)
+            )
+            entities = list(ent_result.scalars().all())
+            matched_ent = _match_entity(entities, clean_name)
+
+            card = CharacterCard(
+                book_id=book_id,
+                name=clean_name,
+                summary=summary,
+                entity_id=matched_ent.id if matched_ent else None,
+            )
+            db.add(card)
+            await db.commit()
+
+        link_note = "（已关联同名实体）" if matched_ent else ""
+        return f"已成功创建关键角色卡「{clean_name}」{link_note}。"
+
+    # ── 19. edit_character_card ───────────────────────────────────────────────
+
+    @tool(args_schema=EditCharacterCardInput)
+    async def edit_character_card(
+        name: str, new_name: str | None = None, summary: str | None = None
+    ) -> str:
+        """修改某张「关键角色卡」的角色名称或简介（不涉及子条目）。"""
+        if new_name is None and summary is None:
+            return "未提供任何修改内容，角色卡未变更。"
+
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            card = _match_enabled_card(cards, name)
+            if not card:
+                return f"未找到名为「{name}」的关键角色卡，无法修改。"
+
+            target = await db.get(CharacterCard, card.id)
+            changed: list[str] = []
+            if new_name is not None and new_name.strip():
+                target.name = new_name.strip()
+                changed.append("名称")
+            if summary is not None:
+                target.summary = summary
+                changed.append("简介")
+            if not changed:
+                return "未提供有效的修改内容，角色卡未变更。"
+            await db.commit()
+
+        return f"已成功修改角色卡「{card.name}」的：{', '.join(changed)}。"
+
+    # ── 20. delete_character_card ─────────────────────────────────────────────
+
+    @tool(args_schema=DeleteCharacterCardInput)
+    async def delete_character_card(name: str) -> str:
+        """删除一张「关键角色卡」及其全部子条目（不可逆，不影响实体本身）。
+        执行前应先向用户确认。"""
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            card = _match_enabled_card(cards, name)
+            if not card:
+                return f"未找到名为「{name}」的关键角色卡，无法删除。"
+
+            card_name = card.name
+            target = await db.get(CharacterCard, card.id)
+            if target is not None:
+                await db.delete(target)
+            await db.commit()
+
+        return f"已成功删除关键角色卡「{card_name}」及其全部条目。"
+
+    # ── 21. add_character_card_entry ──────────────────────────────────────────
+
+    @tool(args_schema=AddCardEntryInput)
+    async def add_character_card_entry(
+        card_name: str, category: str, title: str, content: str | None = None
+    ) -> str:
+        """向某张「关键角色卡」的指定分类下新增一条子条目。
+        分类含：生平/性格特点/人物关系/技能/道具/当前状态/关键伏笔。
+        同一分类下若已存在同名启用条目则拒绝创建，建议改用 edit_character_card_entry。"""
+        if category not in VALID_CATEGORIES:
+            return f"无效的分类「{category}」，请使用：{', '.join(sorted(VALID_CATEGORIES))}"
+        clean_title = title.strip()
+        if not clean_title:
+            return "条目标题不能为空。"
+
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            card = _match_enabled_card(cards, card_name)
+            if not card:
+                return f"未找到名为「{card_name}」的关键角色卡，请先用 create_character_card 创建。"
+
+            dup = any(
+                e.enabled
+                and e.category == category
+                and e.title.lower() == clean_title.lower()
+                for e in card.entries
+            )
+            if dup:
+                return (
+                    f"「{card.name}」的「{CATEGORY_LABELS[category]}」下已存在条目「{clean_title}」，"
+                    f"未重复创建。如需修改请改用 edit_character_card_entry。"
+                )
+
+            max_order = max(
+                (e.sort_order for e in card.entries if e.category == category),
+                default=-1,
+            )
+            entry = CharacterCardEntry(
+                card_id=card.id,
+                category=category,
+                title=clean_title,
+                content=content,
+                sort_order=max_order + 1,
+            )
+            db.add(entry)
+            await db.commit()
+
+        return f"已为角色卡「{card.name}」新增「{CATEGORY_LABELS[category]}」条目：{clean_title}。"
+
+    # ── 22. edit_character_card_entry ─────────────────────────────────────────
+
+    @tool(args_schema=EditCardEntryInput)
+    async def edit_character_card_entry(
+        card_name: str,
+        category: str,
+        title: str,
+        new_title: str | None = None,
+        new_content: str | None = None,
+    ) -> str:
+        """修改某张「关键角色卡」中一条已有子条目的标题或正文。
+        按 角色卡名 + 分类 + 标题 定位条目（仅能定位到启用中的条目）。"""
+        if category not in VALID_CATEGORIES:
+            return f"无效的分类「{category}」，请使用：{', '.join(sorted(VALID_CATEGORIES))}"
+        if new_title is None and new_content is None:
+            return "未提供任何修改内容，条目未变更。"
+
+        title_lower = title.strip().lower()
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            card = _match_enabled_card(cards, card_name)
+            if not card:
+                return f"未找到名为「{card_name}」的关键角色卡。"
+
+            matched = [
+                e
+                for e in card.entries
+                if e.enabled
+                and e.category == category
+                and e.title.lower() == title_lower
+            ]
+            if not matched:
+                return (
+                    f"未在「{card.name}」的「{CATEGORY_LABELS[category]}」下找到条目「{title}」。"
+                )
+
+            entry = await db.get(CharacterCardEntry, matched[0].id)
+            changed: list[str] = []
+            if new_title is not None and new_title.strip():
+                entry.title = new_title.strip()
+                changed.append("标题")
+            if new_content is not None:
+                entry.content = new_content
+                changed.append("正文")
+            if not changed:
+                return "未提供有效的修改内容，条目未变更。"
+            await db.commit()
+
+        return f"已修改「{card.name}」的「{CATEGORY_LABELS[category]}」条目「{title}」的：{', '.join(changed)}。"
+
+    # ── 23. delete_character_card_entry ───────────────────────────────────────
+
+    @tool(args_schema=DeleteCardEntryInput)
+    async def delete_character_card_entry(
+        card_name: str, category: str, title: str
+    ) -> str:
+        """删除某张「关键角色卡」中的一条子条目（不可逆）。
+        按 角色卡名 + 分类 + 标题 定位（仅能定位到启用中的条目）。执行前应先向用户确认。"""
+        if category not in VALID_CATEGORIES:
+            return f"无效的分类「{category}」，请使用：{', '.join(sorted(VALID_CATEGORIES))}"
+
+        title_lower = title.strip().lower()
+        async with AsyncSessionLocal() as db:
+            cards = await _load_cards_with_entries(db)
+            card = _match_enabled_card(cards, card_name)
+            if not card:
+                return f"未找到名为「{card_name}」的关键角色卡。"
+
+            matched = [
+                e
+                for e in card.entries
+                if e.enabled
+                and e.category == category
+                and e.title.lower() == title_lower
+            ]
+            if not matched:
+                return (
+                    f"未在「{card.name}」的「{CATEGORY_LABELS[category]}」下找到条目「{title}」，无法删除。"
+                )
+
+            entry = await db.get(CharacterCardEntry, matched[0].id)
+            if entry is not None:
+                await db.delete(entry)
+            await db.commit()
+
+        return f"已删除「{card.name}」的「{CATEGORY_LABELS[category]}」条目「{title}」。"
+
     return [
         search_knowledge,
         get_entity,
@@ -1053,4 +1426,12 @@ def make_tools(book_id: int) -> list:
         delete_relation,
         get_chapter_text,
         get_chapter_lines,
+        list_character_cards,
+        get_character_card,
+        create_character_card,
+        edit_character_card,
+        delete_character_card,
+        add_character_card_entry,
+        edit_character_card_entry,
+        delete_character_card_entry,
     ]

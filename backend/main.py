@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.db.database import init_db
-from app.api import books, chapters, entities, conversations, settings
+from app.api import books, chapters, entities, conversations, settings, character_cards
 
 
 @asynccontextmanager
@@ -31,6 +31,7 @@ app.add_middleware(
 app.include_router(books.router, prefix="/api/books", tags=["books"])
 app.include_router(chapters.router, prefix="/api/books", tags=["chapters"])
 app.include_router(entities.router, prefix="/api/books", tags=["entities"])
+app.include_router(character_cards.router, prefix="/api/books", tags=["character_cards"])
 app.include_router(conversations.router, prefix="/api/books", tags=["conversations"])
 app.include_router(settings.router, prefix="/api/settings", tags=["settings"])
 

@@ -22,7 +22,7 @@ class Base(DeclarativeBase):
 
 
 async def init_db() -> None:
-    from app.models import book, chapter, entity, conversation  # noqa: F401
+    from app.models import book, chapter, entity, conversation, character_card  # noqa: F401
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

@@ -17,6 +17,7 @@ from app.models.book import Book, ProcessingStatus
 from app.models.chapter import Chapter
 from app.agents.entity_extractor import extract_entities_for_chapter
 from app.agents.anchor_builder import build_anchor_for_chapter
+from app.agents.character_card_builder import update_character_cards_for_chapter
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,13 @@ async def process_book_stream(book_id: int) -> AsyncGenerator[str, None]:
                         db=db,
                     )
                     await build_anchor_for_chapter(
+                        chapter_id=chapter.id,
+                        chapter_number=ch_num,
+                        chapter_text=chapter.raw_text,
+                        book_id=book_id,
+                        db=db,
+                    )
+                    await update_character_cards_for_chapter(
                         chapter_id=chapter.id,
                         chapter_number=ch_num,
                         chapter_text=chapter.raw_text,

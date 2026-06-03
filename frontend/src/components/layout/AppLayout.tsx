@@ -4,6 +4,7 @@ import {
   MessageSquare,
   List,
   Users,
+  IdCard,
   GitFork,
   Settings,
   ChevronLeft,
@@ -19,6 +20,7 @@ const bookNavItems = [
   { to: 'chat', label: '对话', icon: MessageSquare },
   { to: 'chapters', label: '章节', icon: List },
   { to: 'entities', label: '实体', icon: Users },
+  { to: 'character-cards', label: '角色卡', icon: IdCard },
   { to: 'graph', label: '图谱', icon: GitFork },
   { to: 'settings', label: '设置', icon: Settings },
 ]

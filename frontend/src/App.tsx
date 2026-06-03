@@ -7,6 +7,7 @@ import { ProcessingPage } from '@/pages/ProcessingPage'
 import { ChatPage } from '@/pages/ChatPage'
 import { ChaptersPage } from '@/pages/ChaptersPage'
 import { EntitiesPage } from '@/pages/EntitiesPage'
+import { CharacterCardsPage } from '@/pages/CharacterCardsPage'
 import { GraphPage } from '@/pages/GraphPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 
@@ -33,6 +34,7 @@ export default function App() {
               <Route path="chat" element={<ChatPage />} />
               <Route path="chapters" element={<ChaptersPage />} />
               <Route path="entities" element={<EntitiesPage />} />
+              <Route path="character-cards" element={<CharacterCardsPage />} />
               <Route path="graph" element={<GraphPage />} />
               <Route path="settings" element={<SettingsPage />} />
             </Route>
