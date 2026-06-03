@@ -5,16 +5,20 @@ Entity Extractor Agent
 跨章节累积去重后写入数据库与 ChromaDB 向量库。
 """
 
+from __future__ import annotations
+
 import asyncio
 import logging
 from typing import Any
 
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.entity import Entity, Relation, EntityType
-from app.agents.base import get_processing_llm, get_embeddings
+from app.agents.base import get_processing_llm, get_embeddings, build_robust_parser
 from app.db.chroma_client import get_or_create_collection, ChromaCollections
 
 logger = logging.getLogger(__name__)
@@ -74,28 +78,28 @@ async def extract_entities_for_chapter(
     text = chapter_text[:MAX_CHAPTER_CHARS]
 
     llm = get_processing_llm()
-    structured_llm = llm.with_structured_output(ExtractionResult)
+    parser = PydanticOutputParser(pydantic_object=ExtractionResult)
 
     messages = [
-        (
-            "system",
-            (
+        SystemMessage(
+            content=(
                 "你是一个专业的文学分析助手，负责从小说章节中提取结构化信息。\n"
                 "规则：\n"
                 "- 只提取章节中明确出现或被提及的实体\n"
                 "- type 必须是以下之一：character / organization / location / object / concept\n"
                 "- 人物用最完整、最常用的名称作为 name，其余称呼放入 aliases\n"
                 "- 关系仅列出本章文本中有依据的关系，不推测\n"
-                "- 描述简洁，控制在 1-3 句话以内"
-            ),
+                "- 描述简洁，控制在 1-3 句话以内\n\n"
+                + parser.get_format_instructions()
+            )
         ),
-        (
-            "human",
-            f"请分析以下小说章节（第 {chapter_number} 章），提取实体和关系：\n\n{text}",
+        HumanMessage(
+            content=f"请分析以下小说章节（第 {chapter_number} 章），提取实体和关系：\n\n{text}"
         ),
     ]
 
-    result: ExtractionResult = await asyncio.to_thread(structured_llm.invoke, messages)
+    chain = llm | build_robust_parser(parser, llm)
+    result: ExtractionResult = await asyncio.to_thread(chain.invoke, messages)
 
     # ── 加载本书现有实体，构建去重查找表 ────────────────────────────────────
     existing_result = await db.execute(
@@ -205,7 +209,11 @@ async def extract_entities_for_chapter(
     await db.flush()
 
     # ── ChromaDB 实体向量写入 ─────────────────────────────────────────────────
-    entities_to_embed = list(name_to_db_entity.values())
+    # 多个抽取名可能指向同一实体（别名归并），按 id 去重避免 Chroma 报重复 ID
+    unique_by_id: dict[int, Entity] = {}
+    for ent in name_to_db_entity.values():
+        unique_by_id[ent.id] = ent
+    entities_to_embed = list(unique_by_id.values())
     if not entities_to_embed:
         return
 

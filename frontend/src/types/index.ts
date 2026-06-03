@@ -84,13 +84,39 @@ export interface ToolCall {
   output?: string
 }
 
-export interface ModelSettings {
-  provider: 'openai' | 'anthropic' | 'custom'
-  api_key: string
-  base_url?: string
+/** 与后端 /api/settings 对齐 */
+export type SettingSource = 'user' | 'env' | 'none'
+
+/** GET /api/settings 返回的状态（敏感字段只暴露 has_xxx） */
+export interface RuntimeSettings {
+  openai_base_url: string
   processing_model: string
+  verifier_model: string
   chat_model: string
   embedding_model: string
+  embedding_base_url: string
+  has_openai_key: boolean
+  has_anthropic_key: boolean
+  has_embedding_key: boolean
+  openai_key_source: SettingSource
+  anthropic_key_source: SettingSource
+  openai_base_url_source: SettingSource
+  embedding_key_source: SettingSource
+  embedding_base_url_source: SettingSource
+  user_overrides: string[]
+}
+
+/** PUT /api/settings 提交的字段（全部可选） */
+export interface ModelSettingsUpdate {
+  openai_api_key?: string
+  openai_base_url?: string
+  anthropic_api_key?: string
+  processing_model?: string
+  verifier_model?: string
+  chat_model?: string
+  embedding_model?: string
+  embedding_api_key?: string
+  embedding_base_url?: string
 }
 
 export interface ProcessingProgress {

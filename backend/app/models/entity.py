@@ -1,5 +1,5 @@
 from enum import Enum as PyEnum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Optional
 
 from sqlalchemy import ForeignKey, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -29,9 +29,9 @@ class Entity(Base):
     name: Mapped[str] = mapped_column(String(200), nullable=False)
     aliases: Mapped[list[str]] = mapped_column(JSON, default=list)
     type: Mapped[str] = mapped_column(String(50), default=EntityType.CHARACTER)
-    description: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
     attributes: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
-    first_appearance_chapter: Mapped[int | None] = mapped_column(Integer)
+    first_appearance_chapter: Mapped[Optional[int]] = mapped_column(Integer)
 
     book: Mapped["Book"] = relationship("Book", back_populates="entities")
     source_relations: Mapped[list["Relation"]] = relationship(
@@ -56,7 +56,7 @@ class Relation(Base):
         Integer, ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
     )
     relation_type: Mapped[str] = mapped_column(String(100), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
     chapter_range: Mapped[list[int]] = mapped_column(JSON, default=list)
 
     book: Mapped["Book"] = relationship("Book", back_populates="relations")
@@ -75,13 +75,13 @@ class Event(Base):
     book_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("books.id", ondelete="CASCADE"), nullable=False, index=True
     )
-    chapter_id: Mapped[int | None] = mapped_column(
+    chapter_id: Mapped[Optional[int]] = mapped_column(
         Integer, ForeignKey("chapters.id", ondelete="SET NULL")
     )
     name: Mapped[str] = mapped_column(String(300), nullable=False)
-    description: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[Optional[str]] = mapped_column(Text)
     involved_entities: Mapped[list[Any]] = mapped_column(JSON, default=list)
-    story_timestamp: Mapped[str | None] = mapped_column(String(200))
+    story_timestamp: Mapped[Optional[str]] = mapped_column(String(200))
 
     book: Mapped["Book"] = relationship("Book", back_populates="events")
-    chapter: Mapped["Chapter | None"] = relationship("Chapter")
+    chapter: Mapped[Optional["Chapter"]] = relationship("Chapter")

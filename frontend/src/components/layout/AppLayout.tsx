@@ -7,9 +7,13 @@ import {
   GitFork,
   Settings,
   ChevronLeft,
+  AlertTriangle,
+  CheckCircle2,
+  KeyRound,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useBookStore } from '@/stores/book.store'
+import { useApiReady } from '@/hooks/useApiReady'
 
 const bookNavItems = [
   { to: 'chat', label: '对话', icon: MessageSquare },
@@ -22,6 +26,7 @@ const bookNavItems = [
 export function AppLayout() {
   const { id } = useParams<{ id: string }>()
   const currentBook = useBookStore((s) => s.currentBook)
+  const { ready: apiReady, loading: apiLoading } = useApiReady()
 
   return (
     <div className="flex h-screen bg-background">
@@ -82,6 +87,30 @@ export function AppLayout() {
               书库
             </NavLink>
           )}
+        </div>
+
+        {/* 底部：全局 API 设置入口 + 状态指示 */}
+        <div className="border-t border-sidebar-border p-2">
+          <NavLink
+            to="/settings"
+            className={({ isActive }) =>
+              cn(
+                'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-colors',
+                isActive
+                  ? 'bg-sidebar-accent text-sidebar-accent-foreground font-medium'
+                  : 'text-sidebar-foreground hover:bg-sidebar-accent/50',
+              )
+            }
+            title="配置 API Key 与模型"
+          >
+            <KeyRound className="h-4 w-4 shrink-0" />
+            <span className="flex-1">API 设置</span>
+            {apiLoading ? null : apiReady ? (
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" />
+            ) : (
+              <AlertTriangle className="h-3.5 w-3.5 text-destructive" />
+            )}
+          </NavLink>
         </div>
       </aside>
 

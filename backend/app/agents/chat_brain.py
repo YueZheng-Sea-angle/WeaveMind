@@ -9,6 +9,8 @@ Chat Brain Agent
   - 对话结束后自动将助手消息写入数据库
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

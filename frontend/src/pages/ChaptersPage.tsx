@@ -13,10 +13,15 @@ import {
   Users,
   Eye,
   AlertCircle,
+  RefreshCw,
+  Plus,
+  Trash2,
+  Loader2,
 } from 'lucide-react'
 import { chaptersApi } from '@/api/chapters'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Separator } from '@/components/ui/separator'
 import { cn } from '@/lib/utils'
@@ -27,8 +32,10 @@ type RightTab = 'text' | 'anchor'
 export function ChaptersPage() {
   const { id } = useParams<{ id: string }>()
   const bookId = Number(id)
+  const queryClient = useQueryClient()
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null)
   const [activeTab, setActiveTab] = useState<RightTab>('anchor')
+  const [adding, setAdding] = useState(false)
 
   const { data: chapters = [], isLoading } = useQuery({
     queryKey: ['chapters', bookId],
@@ -37,31 +44,62 @@ export function ChaptersPage() {
   })
 
   useEffect(() => {
-    if (!selectedChapterId && chapters.length > 0) {
+    if (!adding && !selectedChapterId && chapters.length > 0) {
       setSelectedChapterId(chapters[0].id)
     }
-  }, [chapters, selectedChapterId])
+  }, [chapters, selectedChapterId, adding])
 
   const { data: chapterDetail, isLoading: isChapterLoading } = useQuery({
     queryKey: ['chapter', bookId, selectedChapterId],
     queryFn: () => chaptersApi.get(bookId, selectedChapterId as number),
-    enabled: Number.isFinite(bookId) && selectedChapterId != null,
+    enabled: Number.isFinite(bookId) && selectedChapterId != null && !adding,
   })
 
   const { data: anchor, isLoading: isAnchorLoading } = useQuery({
     queryKey: ['anchor', bookId, selectedChapterId],
     queryFn: () => chaptersApi.getAnchor(bookId, selectedChapterId as number),
-    enabled: Number.isFinite(bookId) && selectedChapterId != null,
+    enabled: Number.isFinite(bookId) && selectedChapterId != null && !adding,
     retry: false,
   })
 
+  const nextChapterNumber =
+    chapters.length > 0 ? chapters[chapters.length - 1].chapter_number + 1 : 1
+
+  const deleteMutation = useMutation({
+    mutationFn: (chapterId: number) => chaptersApi.remove(bookId, chapterId),
+    onSuccess: () => {
+      setSelectedChapterId(null)
+      queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+    },
+  })
+
+  const handleDelete = (chapter: Chapter) => {
+    if (
+      !window.confirm(
+        `确定删除「第 ${chapter.chapter_number} 章${chapter.title ? ` · ${chapter.title}` : ''}」吗？其后章节序号会自动前移。`,
+      )
+    )
+      return
+    deleteMutation.mutate(chapter.id)
+  }
+
+  const handleCreated = (created: Chapter) => {
+    setAdding(false)
+    queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+    setSelectedChapterId(created.id)
+    setActiveTab('anchor')
+  }
+
   const renderChapterItem = (chapter: Chapter) => {
-    const isActive = chapter.id === selectedChapterId
+    const isActive = chapter.id === selectedChapterId && !adding
     return (
       <button
         key={chapter.id}
         type="button"
-        onClick={() => setSelectedChapterId(chapter.id)}
+        onClick={() => {
+          setAdding(false)
+          setSelectedChapterId(chapter.id)
+        }}
         className={cn(
           'w-full rounded-md border px-3 py-2 text-left transition-colors',
           isActive
@@ -97,8 +135,20 @@ export function ChaptersPage() {
       <div className="grid flex-1 grid-cols-1 gap-4 overflow-hidden p-4 md:grid-cols-[280px_1fr]">
         {/* 左侧：章节列表 */}
         <section className="flex flex-col overflow-hidden rounded-lg border border-border">
-          <div className="shrink-0 border-b border-border px-3 py-2 text-sm font-medium">
-            分章列表{chapters.length > 0 ? ` (${chapters.length})` : ''}
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3 py-2 text-sm font-medium">
+            <span>分章列表{chapters.length > 0 ? ` (${chapters.length})` : ''}</span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1 text-xs"
+              onClick={() => {
+                setAdding(true)
+                setSelectedChapterId(null)
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              添加章节
+            </Button>
           </div>
           <div className="flex-1 space-y-2 overflow-y-auto p-3">
             {isLoading ? (
@@ -120,7 +170,14 @@ export function ChaptersPage() {
 
         {/* 右侧：内容区 */}
         <section className="flex min-h-0 flex-col overflow-hidden rounded-lg border border-border">
-          {chapterDetail ? (
+          {adding ? (
+            <AddChapterForm
+              bookId={bookId}
+              defaultNumber={nextChapterNumber}
+              onCancel={() => setAdding(false)}
+              onCreated={handleCreated}
+            />
+          ) : chapterDetail ? (
             <>
               {/* 章节标题 + Tab 切换 */}
               <div className="shrink-0 border-b border-border px-4">
@@ -129,9 +186,21 @@ export function ChaptersPage() {
                     第 {chapterDetail.chapter_number} 章
                     {chapterDetail.title ? ` · ${chapterDetail.title}` : ''}
                   </h2>
-                  <span className="text-xs text-muted-foreground">
-                    {chapterDetail.word_count} 字
-                  </span>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">
+                      {chapterDetail.word_count} 字
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                      onClick={() => handleDelete(chapterDetail)}
+                      disabled={deleteMutation.isPending}
+                      title="删除本章"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
                 </div>
                 <div className="flex gap-1 pb-0">
                   <TabButton
@@ -152,11 +221,7 @@ export function ChaptersPage() {
               {/* Tab 内容 */}
               <div className="flex-1 overflow-y-auto">
                 {activeTab === 'text' ? (
-                  <div className="p-5">
-                    <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-foreground">
-                      {chapterDetail.raw_text}
-                    </pre>
-                  </div>
+                  <ChapterTextPanel bookId={bookId} chapter={chapterDetail} />
                 ) : (
                   <AnchorPanel
                     bookId={bookId}
@@ -181,6 +246,186 @@ export function ChaptersPage() {
             </div>
           )}
         </section>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────── AddChapterForm ─────────────────────────── */
+
+interface AddChapterFormProps {
+  bookId: number
+  defaultNumber: number
+  onCancel: () => void
+  onCreated: (created: Chapter) => void
+}
+
+function AddChapterForm({ bookId, defaultNumber, onCancel, onCreated }: AddChapterFormProps) {
+  const [title, setTitle] = useState('')
+  const [chapterNumber, setChapterNumber] = useState<string>(String(defaultNumber))
+  const [rawText, setRawText] = useState('')
+
+  const mutation = useMutation({
+    mutationFn: () =>
+      chaptersApi.create(bookId, {
+        title: title.trim() || null,
+        raw_text: rawText,
+        chapter_number: chapterNumber.trim() ? Number(chapterNumber) : null,
+      }),
+    onSuccess: (created) => onCreated(created),
+  })
+
+  const canSubmit = rawText.trim().length > 0 && !mutation.isPending
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold">添加新章节</h2>
+        <span className="text-xs text-muted-foreground">{rawText.length} 字</span>
+      </div>
+
+      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+        <div className="grid grid-cols-[120px_1fr] gap-3">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">章节序号</label>
+            <Input
+              type="number"
+              min={1}
+              value={chapterNumber}
+              onChange={(e) => setChapterNumber(e.target.value)}
+              placeholder="末尾"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">标题（可选）</label>
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="如：第十二章 · 暗流"
+            />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          插入到已有序号位置时，其后章节会自动顺延。留空则追加到末尾。
+        </p>
+
+        <div className="space-y-1.5">
+          <label className="text-xs font-medium text-muted-foreground">章节正文</label>
+          <Textarea
+            value={rawText}
+            onChange={(e) => setRawText(e.target.value)}
+            rows={16}
+            className="resize-none text-sm leading-7"
+            placeholder="粘贴或输入本章正文..."
+          />
+        </div>
+
+        {mutation.isError && (
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            添加失败：{(mutation.error as Error)?.message}
+          </p>
+        )}
+      </div>
+
+      <div className="flex shrink-0 justify-end gap-2 border-t border-border px-4 py-3">
+        <Button variant="outline" size="sm" onClick={onCancel} disabled={mutation.isPending}>
+          取消
+        </Button>
+        <Button size="sm" onClick={() => mutation.mutate()} disabled={!canSubmit} className="gap-1.5">
+          {mutation.isPending ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <Check className="h-3.5 w-3.5" />
+          )}
+          保存章节
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+/* ─────────────────────────── ChapterTextPanel ─────────────────────────── */
+
+function ChapterTextPanel({ bookId, chapter }: { bookId: number; chapter: Chapter }) {
+  const queryClient = useQueryClient()
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState(chapter.raw_text)
+
+  useEffect(() => {
+    setText(chapter.raw_text)
+    setEditing(false)
+  }, [chapter.id, chapter.raw_text])
+
+  const mutation = useMutation({
+    mutationFn: () => chaptersApi.update(bookId, chapter.id, { raw_text: text }),
+    onSuccess: () => {
+      setEditing(false)
+      queryClient.invalidateQueries({ queryKey: ['chapter', bookId, chapter.id] })
+      queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+    },
+  })
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex shrink-0 items-center justify-between px-5 pt-4">
+        <span className="text-xs text-muted-foreground">
+          {editing ? '编辑原文后请记得保存，并可在「章节锚点」点击重新分析' : '章节原文'}
+        </span>
+        {!editing ? (
+          <Button variant="ghost" size="sm" onClick={() => setEditing(true)} className="gap-1.5 text-xs h-7">
+            <Edit2 className="h-3.5 w-3.5" />
+            编辑原文
+          </Button>
+        ) : (
+          <div className="flex gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setText(chapter.raw_text)
+                setEditing(false)
+              }}
+              disabled={mutation.isPending}
+              className="gap-1 text-xs h-7"
+            >
+              <X className="h-3.5 w-3.5" />
+              取消
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => mutation.mutate()}
+              disabled={mutation.isPending || text === chapter.raw_text}
+              className="gap-1 text-xs h-7"
+            >
+              {mutation.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Check className="h-3.5 w-3.5" />
+              )}
+              保存
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {mutation.isError && (
+        <p className="mx-5 mt-2 rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          保存失败：{(mutation.error as Error)?.message}
+        </p>
+      )}
+
+      <div className="flex-1 overflow-y-auto p-5 pt-3">
+        {editing ? (
+          <Textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            className="min-h-[60vh] resize-none text-sm leading-7"
+          />
+        ) : (
+          <pre className="whitespace-pre-wrap break-words font-sans text-sm leading-7 text-foreground">
+            {chapter.raw_text}
+          </pre>
+        )}
       </div>
     </div>
   )
@@ -266,6 +511,33 @@ function AnchorPanel({ bookId, chapterId, anchor, isLoading }: AnchorPanelProps)
     },
   })
 
+  const reprocessMutation = useMutation({
+    mutationFn: () => chaptersApi.reprocess(bookId, chapterId),
+    onSuccess: () => {
+      setEditing(false)
+      queryClient.invalidateQueries({ queryKey: ['anchor', bookId, chapterId] })
+      queryClient.invalidateQueries({ queryKey: ['chapter', bookId, chapterId] })
+      queryClient.invalidateQueries({ queryKey: ['chapters', bookId] })
+      queryClient.invalidateQueries({ queryKey: ['entities', bookId] })
+      queryClient.invalidateQueries({ queryKey: ['relations', bookId] })
+    },
+  })
+
+  const reprocessing = reprocessMutation.isPending
+
+  const reprocessButton = (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => reprocessMutation.mutate()}
+      disabled={reprocessing}
+      className="gap-1.5 text-xs h-7"
+    >
+      <RefreshCw className={cn('h-3.5 w-3.5', reprocessing && 'animate-spin')} />
+      {reprocessing ? '分析中...' : '重新分析'}
+    </Button>
+  )
+
   const handleEdit = () => {
     if (!anchor) return
     setForm({
@@ -314,7 +586,13 @@ function AnchorPanel({ bookId, chapterId, anchor, isLoading }: AnchorPanelProps)
       <div className="flex h-full flex-col items-center justify-center gap-3 text-muted-foreground">
         <AlertCircle className="h-8 w-8 opacity-30" />
         <p className="text-sm">该章节锚点尚未生成</p>
-        <p className="text-xs opacity-70">处理完成后锚点将自动填充</p>
+        <p className="text-xs opacity-70">可能是分析失败或尚未处理，点击下方按钮单独重新分析本章</p>
+        {reprocessButton}
+        {reprocessMutation.isError && (
+          <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            重新分析失败：{(reprocessMutation.error as Error)?.message}
+          </p>
+        )}
       </div>
     )
   }
@@ -328,10 +606,13 @@ function AnchorPanel({ bookId, chapterId, anchor, isLoading }: AnchorPanelProps)
           <span>AI 生成锚点</span>
         </div>
         {!editing ? (
-          <Button variant="ghost" size="sm" onClick={handleEdit} className="gap-1.5 text-xs h-7">
-            <Edit2 className="h-3.5 w-3.5" />
-            编辑
-          </Button>
+          <div className="flex gap-1">
+            {reprocessButton}
+            <Button variant="ghost" size="sm" onClick={handleEdit} className="gap-1.5 text-xs h-7">
+              <Edit2 className="h-3.5 w-3.5" />
+              编辑
+            </Button>
+          </div>
         ) : (
           <div className="flex gap-1">
             <Button variant="ghost" size="sm" onClick={handleCancel} className="gap-1 text-xs h-7">
@@ -354,6 +635,12 @@ function AnchorPanel({ bookId, chapterId, anchor, isLoading }: AnchorPanelProps)
       {mutation.isError && (
         <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
           保存失败：{(mutation.error as Error)?.message}
+        </p>
+      )}
+
+      {reprocessMutation.isError && (
+        <p className="rounded-md bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          重新分析失败：{(reprocessMutation.error as Error)?.message}
         </p>
       )}
 

@@ -1,6 +1,6 @@
 from datetime import datetime
 from enum import Enum as PyEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import DateTime, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -26,8 +26,8 @@ class Book(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(500), nullable=False)
-    author: Mapped[str | None] = mapped_column(String(200))
-    description: Mapped[str | None] = mapped_column(Text)
+    author: Mapped[Optional[str]] = mapped_column(String(200))
+    description: Mapped[Optional[str]] = mapped_column(Text)
     processing_status: Mapped[str] = mapped_column(
         String(50), default=ProcessingStatus.PENDING, nullable=False
     )

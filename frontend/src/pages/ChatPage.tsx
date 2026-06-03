@@ -15,7 +15,7 @@ export function ChatPage() {
   const bookId = Number(id)
   const queryClient = useQueryClient()
   const { activeConversationId } = useChatStore()
-  const chatModel = useSettingsStore((s) => s.settings.chat_model)
+  const chatModel = useSettingsStore((s) => s.settings?.chat_model)
 
   const [isStreaming, setIsStreaming] = useState(false)
   const [streamingContent, setStreamingContent] = useState('')

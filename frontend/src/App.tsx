@@ -8,7 +8,7 @@ import { ChatPage } from '@/pages/ChatPage'
 import { ChaptersPage } from '@/pages/ChaptersPage'
 import { EntitiesPage } from '@/pages/EntitiesPage'
 import { GraphPage } from '@/pages/GraphPage'
-import { BookSettingsPage } from '@/pages/BookSettingsPage'
+import { SettingsPage } from '@/pages/SettingsPage'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -26,6 +26,7 @@ export default function App() {
         <Routes>
           <Route element={<AppLayout />}>
             <Route path="/" element={<HomePage />} />
+            <Route path="/settings" element={<SettingsPage />} />
             <Route path="/books/:id" element={<BookLayout />}>
               <Route index element={<Navigate to="chat" replace />} />
               <Route path="processing" element={<ProcessingPage />} />
@@ -33,7 +34,7 @@ export default function App() {
               <Route path="chapters" element={<ChaptersPage />} />
               <Route path="entities" element={<EntitiesPage />} />
               <Route path="graph" element={<GraphPage />} />
-              <Route path="settings" element={<BookSettingsPage />} />
+              <Route path="settings" element={<SettingsPage />} />
             </Route>
           </Route>
         </Routes>

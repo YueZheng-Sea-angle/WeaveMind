@@ -53,6 +53,10 @@ _STRATEGIES: list[tuple[str, re.Pattern]] = [
             re.MULTILINE,
         ),
     ),
+    (
+        "zh_book_section",
+        re.compile(r"^《[^》]+》$", re.MULTILINE),
+    ),
 ]
 
 
@@ -96,20 +100,25 @@ async def _llm_split(text: str) -> Optional[list[dict]]:
     """
     LLM fallback：发送文本前 4000 字给模型，让其识别章节标题的正则模式，
     再用该模式对全文进行切割。
-    需要 OPENAI_API_KEY 已配置；失败时返回 None 而非抛出异常。
+    优先使用运行时配置（前端设置），其次回退到环境变量；失败时返回 None 而非抛出异常。
     """
     from app.core.config import settings
+    from app.api.settings import get_runtime_setting
 
-    if not settings.OPENAI_API_KEY:
-        logger.warning("LLM fallback 不可用：未配置 OPENAI_API_KEY")
+    api_key = get_runtime_setting("openai_api_key", settings.OPENAI_API_KEY)
+    base_url = get_runtime_setting("openai_base_url", settings.OPENAI_BASE_URL)
+    model = get_runtime_setting("processing_model", settings.DEFAULT_PROCESSING_MODEL)
+
+    if not api_key:
+        logger.warning("LLM fallback 不可用：未配置 API Key")
         return None
 
     try:
         from openai import AsyncOpenAI
 
         client = AsyncOpenAI(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
+            api_key=api_key,
+            base_url=base_url or None,
         )
 
         sample = text[:4000]
@@ -117,7 +126,7 @@ async def _llm_split(text: str) -> Optional[list[dict]]:
             "你是一个小说章节识别助手。请分析以下文本片段，识别章节标题的正则表达式模式。\n\n"
             f"文本样本（前4000字符）：\n```\n{sample}\n```\n\n"
             "请：\n"
-            "1. 识别章节标题的格式（如「第X章」「Chapter X」等）\n"
+            "1. 识别章节标题的格式（如「第X章」「Chapter X」「《书名·其X·人名》」等）\n"
             "2. 返回一个 Python 正则表达式字符串（用于 re.compile + re.MULTILINE），"
             "能匹配所有章节标题行\n"
             "3. 只返回正则表达式字符串本身，不要任何解释，不要代码块标记\n\n"
@@ -125,7 +134,7 @@ async def _llm_split(text: str) -> Optional[list[dict]]:
         )
 
         response = await client.chat.completions.create(
-            model=settings.DEFAULT_PROCESSING_MODEL,
+            model=model,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=200,
             temperature=0,

@@ -1,9 +1,18 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { BookOpen, Upload, Trash2, Loader2, Clock } from 'lucide-react'
+import {
+  BookOpen,
+  Upload,
+  Trash2,
+  Loader2,
+  Clock,
+  AlertTriangle,
+  KeyRound,
+} from 'lucide-react'
 import { booksApi } from '@/api/books'
 import { useBookStore } from '@/stores/book.store'
+import { useApiReady } from '@/hooks/useApiReady'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -31,6 +40,7 @@ export function HomePage() {
   const [title, setTitle] = useState('')
   const [uploading, setUploading] = useState(false)
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const { ready: apiReady, loading: apiLoading } = useApiReady()
 
   const { data: books = [], isLoading } = useQuery({
     queryKey: ['books'],
@@ -79,12 +89,36 @@ export function HomePage() {
 
   return (
     <div className="flex flex-1 flex-col overflow-auto">
-      <header className="border-b border-border px-6 py-4">
-        <h1 className="text-xl font-semibold">书库</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">上传并分析你的长篇小说</p>
+      <header className="flex items-center justify-between gap-3 border-b border-border px-6 py-4">
+        <div>
+          <h1 className="text-xl font-semibold">书库</h1>
+          <p className="mt-0.5 text-sm text-muted-foreground">上传并分析你的长篇小说</p>
+        </div>
+        <Button asChild variant="outline" size="sm">
+          <Link to="/settings">
+            <KeyRound />
+            API 设置
+          </Link>
+        </Button>
       </header>
 
       <div className="flex flex-1 flex-col gap-6 p-6">
+        {/* API 未配置时的引导横幅 */}
+        {!apiLoading && !apiReady && (
+          <div className="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-destructive">尚未配置任何 AI API Key</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                请先到 API 设置中填入 OpenAI 或 Anthropic 的 Key，否则上传后的章节将无法被分析。
+              </p>
+            </div>
+            <Button asChild size="sm">
+              <Link to="/settings">前往设置</Link>
+            </Button>
+          </div>
+        )}
+
         {/* Upload card */}
         <div className="rounded-lg border border-dashed border-border bg-muted/30 p-6">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-end">

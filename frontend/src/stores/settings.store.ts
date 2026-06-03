@@ -1,28 +1,17 @@
 import { create } from 'zustand'
-import { persist } from 'zustand/middleware'
-import type { ModelSettings } from '@/types'
+import type { RuntimeSettings } from '@/types'
 
+/**
+ * 后端 RuntimeSettings 的客户端缓存（只读快照）。
+ * - 仅保存非敏感字段，API Key 原文不会进入此 store 或 localStorage。
+ * - SettingsPage 在加载 / 更新 / 重置时会调用 setSettings 同步。
+ */
 interface SettingsStore {
-  settings: ModelSettings
-  updateSettings: (patch: Partial<ModelSettings>) => void
+  settings: RuntimeSettings | null
+  setSettings: (s: RuntimeSettings) => void
 }
 
-const defaultSettings: ModelSettings = {
-  provider: 'openai',
-  api_key: '',
-  base_url: '',
-  processing_model: 'gpt-4o-mini',
-  chat_model: 'gpt-4o',
-  embedding_model: 'text-embedding-3-small',
-}
-
-export const useSettingsStore = create<SettingsStore>()(
-  persist(
-    (set) => ({
-      settings: defaultSettings,
-      updateSettings: (patch) =>
-        set((state) => ({ settings: { ...state.settings, ...patch } })),
-    }),
-    { name: 'readagent-settings' }
-  )
-)
+export const useSettingsStore = create<SettingsStore>((set) => ({
+  settings: null,
+  setSettings: (s) => set({ settings: s }),
+}))

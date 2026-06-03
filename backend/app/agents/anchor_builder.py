@@ -8,12 +8,14 @@ Anchor Builder Agent
 import asyncio
 import logging
 
+from langchain.output_parsers import PydanticOutputParser
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.models.chapter import ChapterAnchor
-from app.agents.base import get_processing_llm, get_embeddings
+from app.agents.base import get_processing_llm, get_embeddings, build_robust_parser
 from app.db.chroma_client import get_or_create_collection, ChromaCollections
 
 logger = logging.getLogger(__name__)
@@ -60,12 +62,11 @@ async def build_anchor_for_chapter(
     text = chapter_text[:MAX_CHAPTER_CHARS]
 
     llm = get_processing_llm()
-    structured_llm = llm.with_structured_output(AnchorResult)
+    parser = PydanticOutputParser(pydantic_object=AnchorResult)
 
     messages = [
-        (
-            "system",
-            (
+        SystemMessage(
+            content=(
                 "你是一个专业的文学分析助手，负责为小说章节生成高质量的结构化锚点信息，"
                 "用于构建可检索的知识库。\n"
                 "要求：\n"
@@ -73,16 +74,17 @@ async def build_anchor_for_chapter(
                 "- key_events：按时间顺序排列，每条一句话，突出因果关系\n"
                 "- characters_present：使用人物最常用的称呼，不要重复\n"
                 "- foreshadowing：仅列出文本中有明显暗示的伏笔，不过度解读\n"
-                "- themes：精炼的关键词，3-5 个即可"
-            ),
+                "- themes：精炼的关键词，3-5 个即可\n\n"
+                + parser.get_format_instructions()
+            )
         ),
-        (
-            "human",
-            f"请为以下小说章节（第 {chapter_number} 章）生成锚点信息：\n\n{text}",
+        HumanMessage(
+            content=f"请为以下小说章节（第 {chapter_number} 章）生成锚点信息：\n\n{text}"
         ),
     ]
 
-    result: AnchorResult = await asyncio.to_thread(structured_llm.invoke, messages)
+    chain = llm | build_robust_parser(parser, llm)
+    result: AnchorResult = await asyncio.to_thread(chain.invoke, messages)
 
     # ── 写入或更新 chapter_anchors ────────────────────────────────────────────
     existing_result = await db.execute(

@@ -73,7 +73,7 @@ async def process_book_stream(book_id: int) -> AsyncGenerator[str, None]:
 
             book.processing_status = ProcessingStatus.PROCESSING
             book.processed_chapters = 0
-            await db.flush()
+            await db.commit()
 
             total = len(chapters)
             yield _sse("start", {"total": total, "message": f"开始处理，共 {total} 章"})
@@ -112,7 +112,7 @@ async def process_book_stream(book_id: int) -> AsyncGenerator[str, None]:
                     )
 
                     book.processed_chapters += 1
-                    await db.flush()
+                    await db.commit()
 
                     yield _sse(
                         "progress",
@@ -147,7 +147,7 @@ async def process_book_stream(book_id: int) -> AsyncGenerator[str, None]:
                 if not failed_chapters
                 else ProcessingStatus.FAILED
             )
-            await db.flush()
+            await db.commit()
 
             yield _sse(
                 "complete",

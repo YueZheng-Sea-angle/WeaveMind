@@ -5,6 +5,8 @@ Chat Brain 工具集
 每个工具内部创建独立的 AsyncSession，不依赖外部传入的数据库会话。
 """
 
+from __future__ import annotations
+
 import asyncio
 import json
 import logging

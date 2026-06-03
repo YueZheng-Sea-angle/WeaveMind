@@ -3,8 +3,10 @@ uvicorn[standard]==0.30.6
 sqlalchemy==2.0.35
 aiosqlite==0.20.0
 alembic==1.13.2
+greenlet==3.2.5
 pydantic==2.9.2
 pydantic-settings==2.5.2
+eval_type_backport==0.3.1
 chromadb==0.5.15
 langchain==0.3.4
 langchain-openai==0.2.3
