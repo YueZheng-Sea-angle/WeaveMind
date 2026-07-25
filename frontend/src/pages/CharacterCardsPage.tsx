@@ -1,4 +1,4 @@
-import { useState, useDeferredValue } from 'react'
+import { useState, useDeferredValue, useEffect, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
@@ -11,12 +11,19 @@ import {
   Plus,
   Trash2,
   Loader2,
+  Sparkles,
+  CheckCircle,
+  XCircle,
+  AlertTriangle,
 } from 'lucide-react'
-import { characterCardsApi } from '@/api/characterCards'
+import { characterCardsApi, characterCardsBuildStreamUrl } from '@/api/characterCards'
+import { chaptersApi } from '@/api/chapters'
 import type {
   CharacterCard,
   CharacterCardEntry,
   CharacterCardCategory,
+  ProcessingProgress,
+  ProcessingComplete,
 } from '@/types'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -85,6 +92,7 @@ export function CharacterCardsPage() {
   const [search, setSearch] = useState('')
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [adding, setAdding] = useState(false)
+  const [building, setBuilding] = useState(false)
 
   const deferredSearch = useDeferredValue(search)
 
@@ -117,18 +125,35 @@ export function CharacterCardsPage() {
         <div className="p-4 space-y-3 border-b shrink-0">
           <div className="flex items-center justify-between gap-2">
             <h1 className="text-sm font-semibold">关键角色卡</h1>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 gap-1 text-xs"
-              onClick={() => {
-                setAdding(true)
-                setSelectedId(null)
-              }}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              新建角色
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => {
+                  setBuilding(true)
+                  setAdding(false)
+                  setSelectedId(null)
+                }}
+                title="按章或一键自动构建角色卡"
+              >
+                <Sparkles className="h-3.5 w-3.5" />
+                一键建立
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 text-xs"
+                onClick={() => {
+                  setAdding(true)
+                  setBuilding(false)
+                  setSelectedId(null)
+                }}
+              >
+                <Plus className="h-3.5 w-3.5" />
+                新建角色
+              </Button>
+            </div>
           </div>
           <div className="relative">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground pointer-events-none" />
@@ -167,6 +192,7 @@ export function CharacterCardsPage() {
                   isSelected={selectedId === card.id}
                   onClick={() => {
                     setAdding(false)
+                    setBuilding(false)
                     setSelectedId((prev) => (prev === card.id ? null : card.id))
                   }}
                   onToggle={(enabled) =>
@@ -185,8 +211,14 @@ export function CharacterCardsPage() {
         )}
       </div>
 
-      {/* 右侧：详情 / 新建 */}
-      {adding ? (
+      {/* 右侧：构建 / 详情 / 新建 */}
+      {building ? (
+        <BuildPanel
+          bookId={bookId}
+          onClose={() => setBuilding(false)}
+          onChanged={invalidate}
+        />
+      ) : adding ? (
         <AddCardPanel
           bookId={bookId}
           onCancel={() => setAdding(false)}
@@ -262,6 +294,294 @@ function CardRow({
         />
       </div>
     </button>
+  )
+}
+
+/* ───────────────────────────── BuildPanel ───────────────────────────── */
+
+interface BuildLog {
+  chapter_number: number
+  chapter_title: string
+  status: 'processing' | 'done' | 'error'
+  error?: string
+}
+
+function BuildPanel({
+  bookId,
+  onClose,
+  onChanged,
+}: {
+  bookId: number
+  onClose: () => void
+  onChanged: () => void
+}) {
+  const { data: chapters = [] } = useQuery({
+    queryKey: ['chapters', bookId],
+    queryFn: () => chaptersApi.list(bookId),
+    enabled: Boolean(bookId),
+  })
+
+  // ── 一键建立（全书 SSE） ──
+  const [running, setRunning] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [processed, setProcessed] = useState(0)
+  const [logs, setLogs] = useState<BuildLog[]>([])
+  const [done, setDone] = useState(false)
+  const [fatal, setFatal] = useState<string | null>(null)
+  const [failed, setFailed] = useState<number[]>([])
+  const esRef = useRef<EventSource | null>(null)
+  const logsEndRef = useRef<HTMLDivElement>(null)
+
+  // ── 按章建立 ──
+  const [selectedChapterId, setSelectedChapterId] = useState<number | ''>('')
+
+  useEffect(() => {
+    return () => esRef.current?.close()
+  }, [])
+
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [logs])
+
+  const upsertLog = (entry: BuildLog) =>
+    setLogs((prev) => {
+      const idx = prev.findIndex((l) => l.chapter_number === entry.chapter_number)
+      if (idx >= 0) {
+        const next = [...prev]
+        next[idx] = entry
+        return next
+      }
+      return [...prev, entry]
+    })
+
+  const startBuildAll = () => {
+    if (running) return
+    setRunning(true)
+    setDone(false)
+    setFatal(null)
+    setLogs([])
+    setProcessed(0)
+    setFailed([])
+
+    const es = new EventSource(characterCardsBuildStreamUrl(bookId))
+    esRef.current = es
+
+    es.addEventListener('start', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as { total: number }
+      setTotal(data.total)
+    })
+    es.addEventListener('progress', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as ProcessingProgress
+      setProcessed(data.processed)
+      setTotal(data.total)
+      upsertLog({
+        chapter_number: data.chapter_number,
+        chapter_title: data.chapter_title,
+        status: data.status,
+      })
+      if (data.status === 'done') onChanged()
+    })
+    es.addEventListener('chapter_error', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as {
+        chapter_number: number
+        chapter_title: string
+        error: string
+      }
+      upsertLog({
+        chapter_number: data.chapter_number,
+        chapter_title: data.chapter_title,
+        status: 'error',
+        error: data.error,
+      })
+    })
+    es.addEventListener('complete', (e) => {
+      const data = JSON.parse((e as MessageEvent).data) as ProcessingComplete
+      setProcessed(data.processed)
+      setFailed(data.failed_chapters)
+      setDone(true)
+      setRunning(false)
+      es.close()
+      onChanged()
+    })
+    es.addEventListener('error', (e) => {
+      const raw = (e as MessageEvent).data
+      if (raw) {
+        try {
+          setFatal((JSON.parse(raw) as { message: string }).message)
+        } catch {
+          setFatal(String(raw))
+        }
+      } else if (!done) {
+        setFatal('连接已断开')
+      }
+      setDone(true)
+      setRunning(false)
+      es.close()
+    })
+  }
+
+  const chapterMutation = useMutation({
+    mutationFn: (chapterId: number) => characterCardsApi.buildChapter(bookId, chapterId),
+    onSuccess: onChanged,
+  })
+
+  const percent = total > 0 ? Math.round((processed / total) * 100) : 0
+
+  return (
+    <div className="flex flex-col flex-1 overflow-hidden border-l">
+      <div className="flex items-center justify-between px-5 py-4 border-b shrink-0">
+        <div className="flex items-center gap-2">
+          <Sparkles className="h-4 w-4 text-primary" />
+          <h2 className="text-base font-semibold">自动建立角色卡</h2>
+        </div>
+        <Button variant="ghost" size="icon" onClick={onClose} title="关闭">
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto p-5 space-y-6">
+        <p className="text-xs text-muted-foreground leading-relaxed">
+          自动构建仅运行角色卡分析（不重跑实体与锚点），逐章顺序累积。适用于本功能上线前已有的旧书库。
+        </p>
+
+        {/* 一键建立 */}
+        <div className="space-y-3">
+          <Label>一键建立（全部章节）</Label>
+          <Button
+            onClick={startBuildAll}
+            disabled={running}
+            className="gap-2 w-full"
+          >
+            {running ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : done && !fatal ? (
+              failed.length > 0 ? (
+                <AlertTriangle className="h-4 w-4" />
+              ) : (
+                <CheckCircle className="h-4 w-4" />
+              )
+            ) : (
+              <Sparkles className="h-4 w-4" />
+            )}
+            {running
+              ? `构建中… ${processed}/${total}`
+              : done
+                ? '重新构建全部'
+                : '开始一键建立'}
+          </Button>
+
+          {(running || done) && (
+            <>
+              <div className="h-2 w-full overflow-hidden rounded-full bg-secondary">
+                <div
+                  className="h-full rounded-full bg-primary transition-all duration-300"
+                  style={{ width: `${done && !fatal ? 100 : percent}%` }}
+                />
+              </div>
+              <div className="h-48 overflow-y-auto rounded-lg border border-border bg-muted/30 p-3 font-mono text-xs">
+                {logs.map((log) => (
+                  <div
+                    key={log.chapter_number}
+                    className={cn(
+                      'flex items-center gap-2 py-0.5',
+                      log.status === 'error'
+                        ? 'text-destructive'
+                        : log.status === 'done'
+                          ? 'text-muted-foreground'
+                          : 'text-foreground',
+                    )}
+                  >
+                    <span className="w-4 shrink-0">
+                      {log.status === 'done' ? '✓' : log.status === 'error' ? '✗' : '…'}
+                    </span>
+                    <span className="truncate">
+                      {log.chapter_title}
+                      {log.error && (
+                        <span className="ml-2 text-destructive/70">{log.error}</span>
+                      )}
+                    </span>
+                  </div>
+                ))}
+                {fatal && <div className="py-0.5 text-destructive">{fatal}</div>}
+                <div ref={logsEndRef} />
+              </div>
+              {done && (
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  {fatal ? (
+                    <>
+                      <XCircle className="h-3.5 w-3.5 text-destructive" />
+                      构建中断
+                    </>
+                  ) : failed.length > 0 ? (
+                    <>
+                      <AlertTriangle className="h-3.5 w-3.5 text-yellow-500" />
+                      完成，{failed.length} 章失败
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle className="h-3.5 w-3.5 text-green-500" />
+                      全部完成
+                    </>
+                  )}
+                </p>
+              )}
+            </>
+          )}
+        </div>
+
+        <Separator />
+
+        {/* 按章建立 */}
+        <div className="space-y-3">
+          <Label>按某一章建立</Label>
+          <p className="text-xs text-muted-foreground">
+            仅针对选定章节调用角色卡 Agent（参考章节「重新分析」）。
+          </p>
+          <div className="flex gap-2">
+            <select
+              value={selectedChapterId}
+              onChange={(e) =>
+                setSelectedChapterId(e.target.value ? Number(e.target.value) : '')
+              }
+              className="flex h-9 flex-1 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            >
+              <option value="">选择章节…</option>
+              {chapters.map((ch) => (
+                <option key={ch.id} value={ch.id}>
+                  第 {ch.chapter_number} 章{ch.title ? ` · ${ch.title}` : ''}
+                </option>
+              ))}
+            </select>
+            <Button
+              variant="outline"
+              className="gap-1.5 shrink-0"
+              disabled={selectedChapterId === '' || chapterMutation.isPending}
+              onClick={() =>
+                selectedChapterId !== '' && chapterMutation.mutate(selectedChapterId)
+              }
+            >
+              {chapterMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="h-4 w-4" />
+              )}
+              建立该章
+            </Button>
+          </div>
+          {chapterMutation.isSuccess && (
+            <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1.5">
+              <CheckCircle className="h-3.5 w-3.5" />
+              已完成该章角色卡构建
+            </p>
+          )}
+          {chapterMutation.isError && (
+            <p className="text-xs text-destructive bg-destructive/10 rounded-md px-3 py-2">
+              构建失败：{(chapterMutation.error as Error)?.message}
+            </p>
+          )}
+        </div>
+      </div>
+    </div>
   )
 }
 

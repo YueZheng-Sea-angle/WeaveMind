@@ -82,4 +82,16 @@ export const characterCardsApi = {
     apiClient.delete(
       `/books/${bookId}/character-cards/${cardId}/entries/${entryId}`,
     ),
+
+  /** 仅针对单个章节调用角色卡 Agent（参考章节「重新分析」），返回最新全部角色卡。 */
+  buildChapter: (bookId: number, chapterId: number) =>
+    apiClient
+      .post<CharacterCard[]>(
+        `/books/${bookId}/character-cards/build/chapter/${chapterId}`,
+      )
+      .then((r) => r.data),
 }
+
+/** 「一键建立」全书角色卡的 SSE 流地址（配合 EventSource 使用）。 */
+export const characterCardsBuildStreamUrl = (bookId: number) =>
+  `/api/books/${bookId}/character-cards/build/stream`

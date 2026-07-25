@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.database import get_db
+from app.models.chapter import Chapter
 from app.models.character_card import (
     CharacterCard,
     CharacterCardEntry,
@@ -21,6 +23,66 @@ from app.schemas.character_card import (
 )
 
 router = APIRouter()
+
+
+# ── 自动构建：一键建立（全书 SSE）与按章构建 ──────────────────────────────────
+# 说明：路由段数与 /{card_id} 系列不冲突，但仍置于前面以保持清晰。
+
+@router.get("/{book_id}/character-cards/build/stream")
+async def build_character_cards_stream_endpoint(book_id: int):
+    """SSE 流：对全书逐章顺序构建/更新关键角色卡（「一键建立」）。
+
+    仅运行角色卡 Agent，不重跑实体提取与锚点；适用于本功能上线前的旧书库。
+    """
+    from app.agents.character_card_builder import build_character_cards_stream
+
+    return StreamingResponse(
+        build_character_cards_stream(book_id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post(
+    "/{book_id}/character-cards/build/chapter/{chapter_id}",
+    response_model=list[CharacterCardRead],
+)
+async def build_character_cards_for_chapter_endpoint(
+    book_id: int,
+    chapter_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """仅针对单个章节调用角色卡 Agent（参考章节「重新分析」），构建/更新关键角色卡。
+
+    返回该书最新的全部角色卡（含子条目）。
+    """
+    from app.agents.character_card_builder import update_character_cards_for_chapter
+
+    chapter = await db.get(Chapter, chapter_id)
+    if not chapter or chapter.book_id != book_id:
+        raise HTTPException(status_code=404, detail="章节不存在")
+
+    try:
+        await update_character_cards_for_chapter(
+            chapter_id=chapter.id,
+            chapter_number=chapter.chapter_number,
+            chapter_text=chapter.raw_text,
+            book_id=book_id,
+            db=db,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"角色卡构建失败：{exc}")
+
+    result = await db.execute(
+        select(CharacterCard)
+        .where(CharacterCard.book_id == book_id)
+        .options(selectinload(CharacterCard.entries))
+        .order_by(CharacterCard.name)
+    )
+    return result.scalars().all()
 
 
 async def _get_card_or_404(
