@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -86,12 +86,18 @@ async def trigger_processing(book_id: int, db: AsyncSession = Depends(get_db)):
 
 
 @router.get("/{book_id}/process/stream")
-async def process_stream(book_id: int):
+async def process_stream(
+    book_id: int,
+    force: bool = Query(
+        False,
+        description="为 true 时强制从头重新分析全书（会覆盖锚点并合并实体，慎用）",
+    ),
+):
     """SSE 流：实时推送书籍处理进度（实体提取 + 章节锚点）。"""
     from app.agents.orchestrator import process_book_stream
 
     return StreamingResponse(
-        process_book_stream(book_id),
+        process_book_stream(book_id, force=force),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",

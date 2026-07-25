@@ -70,7 +70,7 @@ export function HomePage() {
       const createdBook = await booksApi.create(title.trim())
       const book = await booksApi.upload(createdBook.id, selectedFile)
       await queryClient.invalidateQueries({ queryKey: ['books'] })
-      navigate(`/books/${book.id}/processing`)
+      navigate(`/books/${book.id}/processing`, { state: { autoStart: true } })
     } finally {
       setUploading(false)
       setSelectedFile(null)
@@ -80,11 +80,7 @@ export function HomePage() {
   }
 
   const openBook = (book: Book) => {
-    if (book.processing_status === 'processing') {
-      navigate(`/books/${book.id}/processing`)
-    } else {
-      navigate(`/books/${book.id}/chapters`)
-    }
+    navigate(`/books/${book.id}/chapters`)
   }
 
   return (
