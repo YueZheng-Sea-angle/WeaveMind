@@ -124,14 +124,21 @@ export interface RuntimeSettings {
   processing_model: string
   verifier_model: string
   chat_model: string
+  chat_base_url: string
+  card_model: string
   embedding_model: string
   embedding_base_url: string
   has_openai_key: boolean
   has_anthropic_key: boolean
+  has_chat_key: boolean
   has_embedding_key: boolean
   openai_key_source: SettingSource
   anthropic_key_source: SettingSource
+  /** 角色卡模型来源：user=用户单独指定；inherited=跟随处理模型 */
+  card_model_source: 'user' | 'inherited'
   openai_base_url_source: SettingSource
+  chat_key_source: SettingSource
+  chat_base_url_source: SettingSource
   embedding_key_source: SettingSource
   embedding_base_url_source: SettingSource
   user_overrides: string[]
@@ -145,6 +152,9 @@ export interface ModelSettingsUpdate {
   processing_model?: string
   verifier_model?: string
   chat_model?: string
+  chat_api_key?: string
+  chat_base_url?: string
+  card_model?: string
   embedding_model?: string
   embedding_api_key?: string
   embedding_base_url?: string

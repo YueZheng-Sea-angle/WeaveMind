@@ -26,7 +26,13 @@ class Settings(BaseSettings):
     DEFAULT_PROCESSING_MODEL: str = "gpt-4o-mini"
     DEFAULT_VERIFIER_MODEL: str = "gpt-4o"
     DEFAULT_CHAT_MODEL: str = "gpt-4o"
+    # 角色卡构建默认沿用高质量模型（结构化档案生成，建议更强模型）
+    DEFAULT_CARD_MODEL: str = "gpt-4o"
     DEFAULT_EMBEDDING_MODEL: str = "text-embedding-3-small"
+
+    # 对话大脑专属 API（可独立配置，不填则沿用主 API）
+    CHAT_API_KEY: str = ""
+    CHAT_BASE_URL: str = ""
 
     # Embedding 专属 API（可独立配置，不填则沿用主 API）
     EMBEDDING_API_KEY: str = ""

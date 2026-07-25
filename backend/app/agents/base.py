@@ -7,6 +7,7 @@ Agent 基础工厂模块
 
 from __future__ import annotations
 
+import httpx
 import langchain_openai.chat_models.base as _lc_openai_base
 from langchain.output_parsers import OutputFixingParser
 from langchain_core.messages import AIMessage, AIMessageChunk
@@ -59,6 +60,23 @@ _lc_openai_base._convert_delta_to_message_chunk = _patched_delta_to_chunk
 _lc_openai_base._convert_message_to_dict = _patched_msg_to_dict
 
 
+def _make_async_http_client(read_timeout: float) -> httpx.AsyncClient:
+    """创建带合理超时与连接池的 httpx 客户端，降低长流式请求断连概率。"""
+    return httpx.AsyncClient(
+        timeout=httpx.Timeout(
+            connect=30.0,
+            read=read_timeout,
+            write=30.0,
+            pool=30.0,
+        ),
+        limits=httpx.Limits(
+            max_connections=20,
+            max_keepalive_connections=10,
+            keepalive_expiry=60.0,
+        ),
+    )
+
+
 def get_processing_llm() -> ChatOpenAI:
     """返回用于 Agent 处理（实体提取、锚点构建）的 LLM 实例。"""
     api_key = get_runtime_setting("openai_api_key", app_settings.OPENAI_API_KEY)
@@ -74,19 +92,55 @@ def get_processing_llm() -> ChatOpenAI:
     )
 
 
-def get_chat_llm(model_override: str | None = None) -> ChatOpenAI:
-    """返回用于 Chat Brain 对话的 LLM 实例，支持每次请求级别的模型覆盖。"""
+def get_card_builder_llm() -> ChatOpenAI:
+    """返回用于「关键角色卡构建」Agent 的 LLM 实例。
+
+    角色卡需要从整章正文中归纳结构化档案，质量敏感，因此独立于处理模型，
+    允许用户单独指定更强（更贵）的模型。未单独配置时回退到处理模型的有效值，
+    保证旧用户行为不变。
+    """
     api_key = get_runtime_setting("openai_api_key", app_settings.OPENAI_API_KEY)
     base_url = get_runtime_setting("openai_base_url", app_settings.OPENAI_BASE_URL)
-    model = model_override or get_runtime_setting("chat_model", app_settings.DEFAULT_CHAT_MODEL)
+    # 未显式设置 card_model 时，回退到当前生效的 processing_model
+    processing_model = get_runtime_setting(
+        "processing_model", app_settings.DEFAULT_PROCESSING_MODEL
+    )
+    model = get_runtime_setting("card_model", processing_model)
 
     return ChatOpenAI(
         model=model,
         api_key=api_key or "sk-placeholder",
         base_url=base_url or None,
-        temperature=0.3,
+        temperature=0,
         timeout=180,
+    )
+
+
+def get_chat_llm(model_override: str | None = None) -> ChatOpenAI:
+    """返回用于 Chat Brain 对话的 LLM 实例，支持每次请求级别的模型覆盖。
+
+    优先使用对话大脑专属 API Key / Base URL；未单独配置时回退到主 API。
+    """
+    api_key = (
+        get_runtime_setting("chat_api_key", app_settings.CHAT_API_KEY)
+        or get_runtime_setting("openai_api_key", app_settings.OPENAI_API_KEY)
+    )
+    base_url = (
+        get_runtime_setting("chat_base_url", app_settings.CHAT_BASE_URL)
+        or get_runtime_setting("openai_base_url", app_settings.OPENAI_BASE_URL)
+    )
+    model = model_override or get_runtime_setting("chat_model", app_settings.DEFAULT_CHAT_MODEL)
+
+    read_timeout = 300.0
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key or "sk-placeholder",
+        base_url=base_url or None,
+        temperature=0.3,
+        timeout=read_timeout,
+        max_retries=3,
         streaming=True,
+        http_async_client=_make_async_http_client(read_timeout),
     )
 
 

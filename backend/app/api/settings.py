@@ -53,7 +53,7 @@ _runtime_settings: dict[str, Any] = _load()
 # ── Schemas ──────────────────────────────────────────────────────────────────
 
 # 敏感字段：GET 时只返回是否已设置，不返回原文
-_SENSITIVE_KEYS = {"openai_api_key", "anthropic_api_key", "embedding_api_key"}
+_SENSITIVE_KEYS = {"openai_api_key", "anthropic_api_key", "chat_api_key", "embedding_api_key"}
 
 # 允许写入的字段白名单（防止越权写入）
 _ALLOWED_KEYS = {
@@ -63,6 +63,9 @@ _ALLOWED_KEYS = {
     "processing_model",
     "verifier_model",
     "chat_model",
+    "chat_api_key",
+    "chat_base_url",
+    "card_model",
     "embedding_model",
     "embedding_api_key",
     "embedding_base_url",
@@ -76,6 +79,9 @@ class ModelSettings(BaseModel):
     processing_model: str | None = None
     verifier_model: str | None = None
     chat_model: str | None = None
+    chat_api_key: str | None = None
+    chat_base_url: str | None = None
+    card_model: str | None = None
     embedding_model: str | None = None
     embedding_api_key: str | None = None
     embedding_base_url: str | None = None
@@ -101,21 +107,36 @@ async def get_settings() -> dict[str, Any]:
     def _effective(key: str, env_default: str) -> str:
         return rt.get(key) or env_default
 
+    effective_processing = _effective("processing_model", app_settings.DEFAULT_PROCESSING_MODEL)
+
     return {
         "openai_base_url": _effective("openai_base_url", app_settings.OPENAI_BASE_URL),
-        "processing_model": _effective("processing_model", app_settings.DEFAULT_PROCESSING_MODEL),
+        "processing_model": effective_processing,
         "verifier_model": _effective("verifier_model", app_settings.DEFAULT_VERIFIER_MODEL),
         "chat_model": _effective("chat_model", app_settings.DEFAULT_CHAT_MODEL),
+        "chat_base_url": _effective_chat_base_url(rt),
+        # 角色卡模型未显式设置时回退到处理模型的有效值（与后端工厂逻辑一致）
+        "card_model": rt.get("card_model") or effective_processing,
         "embedding_model": _effective("embedding_model", app_settings.DEFAULT_EMBEDDING_MODEL),
         "embedding_base_url": _effective("embedding_base_url", app_settings.EMBEDDING_BASE_URL),
         # 敏感字段：只暴露状态
         "has_openai_key": bool(rt.get("openai_api_key") or app_settings.OPENAI_API_KEY),
         "has_anthropic_key": bool(rt.get("anthropic_api_key") or app_settings.ANTHROPIC_API_KEY),
+        "has_chat_key": bool(
+            rt.get("chat_api_key")
+            or app_settings.CHAT_API_KEY
+            or rt.get("openai_api_key")
+            or app_settings.OPENAI_API_KEY
+        ),
         "has_embedding_key": bool(rt.get("embedding_api_key") or app_settings.EMBEDDING_API_KEY),
         # 配置来源（user / env / none），便于前端展示
         "openai_key_source": _source("openai_api_key", app_settings.OPENAI_API_KEY, rt),
         "anthropic_key_source": _source("anthropic_api_key", app_settings.ANTHROPIC_API_KEY, rt),
+        # 角色卡模型来源：user=用户单独指定，inherited=跟随处理模型
+        "card_model_source": "user" if rt.get("card_model") else "inherited",
         "openai_base_url_source": _source("openai_base_url", app_settings.OPENAI_BASE_URL, rt),
+        "chat_key_source": _chat_key_source(rt),
+        "chat_base_url_source": _chat_base_url_source(rt),
         "embedding_key_source": _source("embedding_api_key", app_settings.EMBEDDING_API_KEY, rt),
         "embedding_base_url_source": _source("embedding_base_url", app_settings.EMBEDDING_BASE_URL, rt),
         # 运行时覆盖列表（不含值），便于前端展示哪些字段已被用户覆盖
@@ -129,6 +150,31 @@ def _source(key: str, env_default: str, rt: dict[str, Any]) -> str:
     if env_default:
         return "env"
     return "none"
+
+
+def _effective_chat_base_url(rt: dict[str, Any]) -> str:
+    """对话大脑 Base URL：专属配置优先，否则回退主 API。"""
+    if rt.get("chat_base_url"):
+        return rt["chat_base_url"]
+    if app_settings.CHAT_BASE_URL:
+        return app_settings.CHAT_BASE_URL
+    return rt.get("openai_base_url") or app_settings.OPENAI_BASE_URL
+
+
+def _chat_key_source(rt: dict[str, Any]) -> str:
+    if rt.get("chat_api_key"):
+        return "user"
+    if app_settings.CHAT_API_KEY:
+        return "env"
+    return _source("openai_api_key", app_settings.OPENAI_API_KEY, rt)
+
+
+def _chat_base_url_source(rt: dict[str, Any]) -> str:
+    if rt.get("chat_base_url"):
+        return "user"
+    if app_settings.CHAT_BASE_URL:
+        return "env"
+    return _source("openai_base_url", app_settings.OPENAI_BASE_URL, rt)
 
 
 @router.put("")
