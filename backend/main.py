@@ -3,8 +3,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.core.logging import setup_logging
 from app.db.database import init_db
 from app.api import books, chapters, entities, conversations, settings, character_cards
+
+setup_logging()
 
 
 @asynccontextmanager
