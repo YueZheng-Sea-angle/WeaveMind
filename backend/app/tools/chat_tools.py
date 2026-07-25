@@ -167,20 +167,69 @@ class DeleteCardEntryInput(BaseModel):
 # ── 工具工厂 ──────────────────────────────────────────────────────────────────
 
 
-def _match_entity(entities: list[Entity], name: str) -> Entity | None:
-    """在实体列表中按名称/别名匹配单个实体，支持精确匹配与包含式模糊匹配。"""
+def _entity_match_score(name_lower: str, ent: Entity) -> float:
+    """计算实体与查询名的匹配得分，0 表示不匹配。得分越高越精确。"""
+    ent_name = ent.name.lower()
+    if ent_name == name_lower:
+        return 1000.0
+    if any((al or "").lower() == name_lower for al in (ent.aliases or [])):
+        return 900.0
+
+    score = 0.0
+    if name_lower in ent_name:
+        # 查询词是实体名的子串（如「卡特琳」→「卡特琳·阿斯特利」）
+        score = len(name_lower) / max(len(ent_name), 1) * 800
+        if ent_name.startswith(name_lower):
+            score += 50
+    elif ent_name in name_lower:
+        # 实体名是查询词的子串（如「卡特」⊂「卡特琳」），权重较低
+        score = len(ent_name) / max(len(name_lower), 1) * 400
+
+    for alias in ent.aliases or []:
+        al = (alias or "").lower()
+        if not al:
+            continue
+        alias_score = 0.0
+        if name_lower in al:
+            alias_score = len(name_lower) / max(len(al), 1) * 700
+            if al.startswith(name_lower):
+                alias_score += 40
+        elif al in name_lower:
+            alias_score = len(al) / max(len(name_lower), 1) * 350
+        score = max(score, alias_score)
+
+    return score
+
+
+def _match_entities(entities: list[Entity], name: str, limit: int = 5) -> list[Entity]:
+    """按匹配精确度降序返回多个候选实体。"""
     name_lower = name.strip().lower()
     if not name_lower:
-        return None
-    for ent in entities:
-        if ent.name.lower() == name_lower:
-            return ent
-        if any((al or "").lower() == name_lower for al in (ent.aliases or [])):
-            return ent
-    for ent in entities:
-        if name_lower in ent.name.lower() or ent.name.lower() in name_lower:
-            return ent
-    return None
+        return []
+    scored = [(ent, _entity_match_score(name_lower, ent)) for ent in entities]
+    scored = [(e, s) for e, s in scored if s > 0]
+    scored.sort(key=lambda x: (-x[1], -len(x[0].name), x[0].name))
+    return [e for e, _ in scored[:limit]]
+
+
+def _match_entity(entities: list[Entity], name: str) -> Entity | None:
+    """在实体列表中按名称/别名匹配最精确的一个实体。"""
+    matches = _match_entities(entities, name, limit=1)
+    return matches[0] if matches else None
+
+
+def _format_entity_detail(ent: Entity) -> str:
+    """格式化单个实体的详细信息。"""
+    aliases_str = "、".join(ent.aliases or []) or "无"
+    attrs_str = json.dumps(ent.attributes or {}, ensure_ascii=False)
+    return (
+        f"【实体：{ent.name}】\n"
+        f"类型：{ent.type}\n"
+        f"别名：{aliases_str}\n"
+        f"首次出场：第{ent.first_appearance_chapter}章\n"
+        f"描述：{ent.description or '暂无描述'}\n"
+        f"属性：{attrs_str}"
+    )
 
 
 def _match_enabled_card(cards: list[CharacterCard], name: str) -> CharacterCard | None:
@@ -266,47 +315,26 @@ def make_tools(book_id: int) -> list:
 
     @tool
     async def get_entity(name: str) -> str:
-        """精确查询实体详细信息（人物、地点、组织、物品、概念）。
-        支持别名模糊匹配，返回实体的描述、属性、别名、首次出场章节等完整信息。"""
+        """查询实体详细信息（人物、地点、组织、物品、概念）。
+        支持名称与别名模糊匹配；若有多个候选，按匹配精确度降序返回最多 5 个。"""
         async with AsyncSessionLocal() as db:
             result = await db.execute(
                 select(Entity).where(Entity.book_id == book_id)
             )
             entities: list[Entity] = list(result.scalars().all())
 
-        name_lower = name.strip().lower()
-        matched: Entity | None = None
-        for ent in entities:
-            if ent.name.lower() == name_lower:
-                matched = ent
-                break
-            for alias in (ent.aliases or []):
-                if alias.lower() == name_lower:
-                    matched = ent
-                    break
-            if matched:
-                break
-
-        # 模糊包含匹配
-        if not matched:
-            for ent in entities:
-                if name_lower in ent.name.lower() or ent.name.lower() in name_lower:
-                    matched = ent
-                    break
-
-        if not matched:
+        matches = _match_entities(entities, name, limit=5)
+        if not matches:
             return f"未找到名为「{name}」的实体，请检查名称是否正确，或尝试使用 search_knowledge 进行语义检索。"
 
-        aliases_str = "、".join(matched.aliases or []) or "无"
-        attrs_str = json.dumps(matched.attributes or {}, ensure_ascii=False)
-        return (
-            f"【实体：{matched.name}】\n"
-            f"类型：{matched.type}\n"
-            f"别名：{aliases_str}\n"
-            f"首次出场：第{matched.first_appearance_chapter}章\n"
-            f"描述：{matched.description or '暂无描述'}\n"
-            f"属性：{attrs_str}"
-        )
+        if len(matches) == 1:
+            return _format_entity_detail(matches[0])
+
+        parts = [f"找到 {len(matches)} 个相关实体（按匹配精确度排序，首选为最可能的目标）："]
+        for i, ent in enumerate(matches, 1):
+            parts.append(f"\n--- 候选 {i} ---")
+            parts.append(_format_entity_detail(ent))
+        return _truncate("\n".join(parts))
 
     # ── 3. get_chapter_anchor ────────────────────────────────────────────────
 
@@ -404,24 +432,7 @@ def make_tools(book_id: int) -> list:
             )
             entities = list(ent_result.scalars().all())
 
-        name_lower = entity_name.strip().lower()
-        matched: Entity | None = None
-        for ent in entities:
-            if ent.name.lower() == name_lower:
-                matched = ent
-                break
-            for alias in (ent.aliases or []):
-                if alias.lower() == name_lower:
-                    matched = ent
-                    break
-            if matched:
-                break
-        if not matched:
-            for ent in entities:
-                if name_lower in ent.name.lower():
-                    matched = ent
-                    break
-
+        matched = _match_entity(entities, entity_name)
         if not matched:
             return f"未找到实体「{entity_name}」，请检查名称或使用 search_knowledge 查找。"
 

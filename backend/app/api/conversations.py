@@ -115,7 +115,17 @@ async def chat_message(
         if m.id != user_msg.id  # 排除刚写入的用户消息，由 chat_stream 单独处理
     ]
 
+    import logging
+
     from app.agents.chat_brain import chat_stream
+
+    logging.getLogger(__name__).info(
+        "POST chat book=%d conv=%d msg_len=%d model=%s",
+        book_id,
+        conv_id,
+        len(payload.message),
+        payload.model or "(default)",
+    )
 
     return StreamingResponse(
         chat_stream(
